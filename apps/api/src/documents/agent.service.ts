@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { openai } from '@ai-sdk/openai';
-import { streamText, embed } from 'ai';
+import { streamText, embed, stepCountIs } from 'ai';
 import { z } from 'zod';
 import { zodSchema } from '@ai-sdk/provider-utils';
 import { PrismaService } from '../prisma.service';
@@ -79,7 +79,9 @@ RULES:
 2. If you find relevant information, cite the document name in your answer.
 3. If the answer is not in the documents, rely on your general knowledge but mention that you couldn't find it in the docs.
 4. Be concise and professional.`,
-            ...(tools && { tools }),
+            // The SDK stops after one step by default, which ends the stream right after a tool call.
+            // Allowing a few steps lets the model read the search results and write the answer.
+            ...(tools && { tools, stopWhen: stepCountIs(3) }),
         });
 
         return result;
