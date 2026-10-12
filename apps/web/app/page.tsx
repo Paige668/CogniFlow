@@ -253,8 +253,11 @@ export default function ChatPage() {
   }
 
   function renderContent(content: string) {
-    // Simple markdown: bold
-    return content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Model output can quote document text, so it is untrusted: render it as React text, never as HTML.
+    // Simple markdown: bold. split() with a capture group puts the bold parts at odd indices.
+    return content
+      .split(/\*\*(.*?)\*\*/g)
+      .map((part, i) => (i % 2 === 1 ? <strong key={i}>{part}</strong> : part));
   }
 
   return (
@@ -445,9 +448,7 @@ export default function ChatPage() {
           <div key={msg.id} className={`message ${msg.role}`}>
             <div className="avatar">{msg.role === 'user' ? '👤' : '⚡'}</div>
             <div className="bubble">
-              <p
-                dangerouslySetInnerHTML={{ __html: renderContent(msg.content) }}
-              />
+              <p>{renderContent(msg.content)}</p>
               {msg.isStreaming && <span className="cursor">▋</span>}
             </div>
           </div>
