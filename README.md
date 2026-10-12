@@ -26,7 +26,7 @@ PostgreSQL    Redis
 
 **Retries.** The queue owns retries: 3 attempts with exponential backoff (5 s, then 10 s). Errors that retrying cannot fix fail on the first attempt: a missing or rejected API key, an account without credits (OpenAI's `insufficient_quota`, which arrives as a 429 like a rate limit), or an input that is too long. Embedding failures are never hidden; an earlier version stored a random vector instead, and the migration that added `status` cleared those placeholder vectors.
 
-**Chat.** `POST /documents/chat` streams the answer as chunked plain text. The model (`gpt-4o`, or `gpt-3.5-turbo` when the `use_gpt4o` flag is off) can call one tool, `search_knowledge_base`, defined with a Zod schema. The tool embeds the query and returns up to 3 documents whose cosine similarity is above 0.5, each cut to its first 500 characters. The agent can take up to 3 steps, so it can read the search results and then answer.
+**Chat.** `POST /documents/chat` streams the answer as chunked plain text. The model (`gpt-4o`, or `gpt-4o-mini` when the `use_gpt4o` flag is off) can call one tool, `search_knowledge_base`, defined with a Zod schema. The tool embeds the query and returns up to 3 documents whose cosine similarity is above 0.5, each cut to its first 500 characters. The agent can take up to 3 steps, so it can read the search results and then answer.
 
 **Errors in chat.** If the model or provider fails before any answer text, the API returns `502` with a short message; the details go to the server log. If it fails midway, the API drops the connection so the client cannot mistake a partial answer for a complete one. The web app shows the error and keeps any partial text, marked as incomplete.
 
@@ -98,7 +98,7 @@ curl -N http://localhost:3000/documents/chat \
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `use_gpt4o` | on | `gpt-4o` when on, `gpt-3.5-turbo` when off |
+| `use_gpt4o` | on | `gpt-4o` when on, `gpt-4o-mini` when off |
 | `rag_enabled` | on | Gives the model the search tool; off means plain chat |
 | `streaming_enabled` | on | Listed, but not used by the code yet |
 

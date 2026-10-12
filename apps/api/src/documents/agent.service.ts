@@ -61,7 +61,7 @@ export class AgentService {
     async chat(messages: any[]): Promise<{ fullStream: AsyncIterable<TextStreamPart<ToolSet>> }> {
         const useGpt4o = this.featureFlags.get('use_gpt4o');
         const ragEnabled = this.featureFlags.get('rag_enabled');
-        const model = useGpt4o ? 'gpt-4o' : 'gpt-3.5-turbo';
+        const model = useGpt4o ? 'gpt-4o' : 'gpt-4o-mini';
 
         this.logger.log(`Chat: model=${model}, rag=${ragEnabled}`);
 
