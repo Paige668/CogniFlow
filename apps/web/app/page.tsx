@@ -194,6 +194,7 @@ export default function ChatPage() {
     setInput('');
     setIsLoading(true);
 
+    let accumulated = '';
     try {
       const allMessages = [...messages, userMessage].map((m) => ({
         role: m.role,
@@ -207,12 +208,13 @@ export default function ChatPage() {
       });
 
       if (!res.ok || !res.body) {
-        throw new Error(`HTTP ${res.status}`);
+        // The API sends { message } with error statuses; fall back to the status code.
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message ?? `HTTP ${res.status}`);
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let accumulated = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -233,11 +235,13 @@ export default function ChatPage() {
         )
       );
     } catch (err: any) {
+      // If the answer broke off midway, keep what arrived and say it is incomplete.
+      const content = accumulated
+        ? `${accumulated}\n\n❌ The answer was interrupted and is incomplete.`
+        : `❌ Error: ${err.message}`;
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === assistantId
-            ? { ...m, content: `❌ Error: ${err.message}`, isStreaming: false }
-            : m
+          m.id === assistantId ? { ...m, content, isStreaming: false } : m
         )
       );
     } finally {

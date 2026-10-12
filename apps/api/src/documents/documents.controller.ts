@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseInterceptors, UploadedFile, Res } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseInterceptors, UploadedFile, Res, Logger } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentsService } from './documents.service';
 import { AgentService } from './agent.service';
@@ -8,36 +9,55 @@ import { ChatDto } from './dto/chat.dto';
 
 @Controller('documents')
 export class DocumentsController {
+  private readonly logger = new Logger(DocumentsController.name);
+
   constructor(
     private readonly documentsService: DocumentsService,
     private readonly agentService: AgentService
   ) { }
 
   @Post('chat')
-  async chat(@Body() chatDto: ChatDto, @Res() res: any) {
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Transfer-Encoding', 'chunked');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.status(200);
+  async chat(@Body() chatDto: ChatDto, @Res() res: Response) {
+    // Headers are sent with the first piece of answer text, so an error before that
+    // can still get a real HTTP error status instead of a 200 with no answer.
+    let started = false;
 
-    let bytesWritten = 0;
     try {
       const result = await this.agentService.chat(chatDto.messages);
-      // Iterate the text stream
-      for await (const chunk of result.textStream) {
-        res.write(chunk);
-        bytesWritten += chunk.length;
+      // fullStream reports model and provider errors as 'error' parts; textStream would skip them silently.
+      for await (const part of result.fullStream) {
+        if (part.type === 'error') throw part.error;
+        if (part.type !== 'text-delta') continue;
+
+        if (!started) {
+          res.status(200);
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.setHeader('Transfer-Encoding', 'chunked');
+          res.setHeader('Cache-Control', 'no-cache');
+          started = true;
+        }
+        res.write(part.text);
       }
-    } catch (error: any) {
-      // Explicit throw in stream iteration
+    } catch (error) {
+      this.logger.error(
+        `Chat failed ${started ? 'mid-answer' : 'before any answer text'}: ${error instanceof Error ? error.message : error}`,
+      );
+      if (started) {
+        // The 200 and part of the answer are already sent. Destroying the socket ends the chunked
+        // response without its final chunk, so the client sees a failed read, not a finished answer.
+        res.destroy();
+        return;
+      }
+      // Provider details stay in the log; the client only learns what happened.
+      res.status(502).json({ message: 'The assistant could not get an answer from the AI model. Please try again later.' });
+      return;
     }
 
-    // If nothing was written (quota error, empty response, etc.), send mock
-    if (bytesWritten === 0) {
-      const mockText = `[MOCK MODE] OpenAI API quota exceeded.\n\nThe CogniFlow RAG architecture is fully operational:\n✅ NestJS API on port 3000\n✅ BullMQ document processing queue\n✅ PostgreSQL + pgvector similarity search\n✅ Agent tool definition\n✅ Streaming infrastructure\n\nAdd OpenAI API credits to enable real AI responses.`;
-      res.write(mockText);
+    if (!started) {
+      this.logger.warn('Chat finished without any answer text');
+      res.status(502).json({ message: 'The AI model returned an empty answer.' });
+      return;
     }
-
     res.end();
   }
 

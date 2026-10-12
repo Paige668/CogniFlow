@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { openai } from '@ai-sdk/openai';
-import { streamText, stepCountIs } from 'ai';
+import { streamText, stepCountIs, type TextStreamPart, type ToolSet } from 'ai';
 import { z } from 'zod';
 import { zodSchema } from '@ai-sdk/provider-utils';
 import { PrismaService } from '../prisma.service';
@@ -58,7 +58,7 @@ export class AgentService {
         };
     }
 
-    async chat(messages: any[]): Promise<{ textStream: AsyncIterable<string> }> {
+    async chat(messages: any[]): Promise<{ fullStream: AsyncIterable<TextStreamPart<ToolSet>> }> {
         const useGpt4o = this.featureFlags.get('use_gpt4o');
         const ragEnabled = this.featureFlags.get('rag_enabled');
         const model = useGpt4o ? 'gpt-4o' : 'gpt-3.5-turbo';
