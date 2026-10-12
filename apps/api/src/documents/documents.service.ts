@@ -4,6 +4,7 @@ import { UpdateDocumentDto } from './dto/update-document.dto';
 import { PrismaService } from '../prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import type { ProcessDocumentJob } from './documents.processor';
 
 @Injectable()
 export class DocumentsService {
@@ -39,11 +40,9 @@ export class DocumentsService {
       }
     });
 
-    // Add job to queue for advanced processing (embedding)
-    await this.documentsQueue.add('process-document', {
-      documentId: doc.id,
-      content: doc.content
-    });
+    // Queue embedding in the background; retries are configured on the queue (DocumentsQueueModule)
+    const job: ProcessDocumentJob = { documentId: doc.id };
+    await this.documentsQueue.add('process-document', job);
 
     return doc;
   }

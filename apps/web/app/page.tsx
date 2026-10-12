@@ -15,12 +15,22 @@ interface Flag {
   description: string;
 }
 
+type DocumentStatus = 'PENDING' | 'READY' | 'FAILED';
+
 interface Document {
   id: string;
   content: string;
   metadata: any;
+  status: DocumentStatus;
+  error: string | null;
   createdAt: string;
 }
+
+const STATUS_LABELS: Record<DocumentStatus, string> = {
+  PENDING: 'Processing…',
+  READY: 'Searchable',
+  FAILED: 'Failed',
+};
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
@@ -51,6 +61,13 @@ export default function ChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Documents are embedded in the background, so keep refreshing while any is still processing.
+  useEffect(() => {
+    if (!showDocs || !documents.some((d) => d.status === 'PENDING')) return;
+    const timer = setTimeout(fetchDocuments, 2000);
+    return () => clearTimeout(timer);
+  }, [showDocs, documents]);
 
   async function fetchFlags() {
     try {
@@ -329,9 +346,14 @@ export default function ChatPage() {
                         {doc.metadata?.originalName || `Document ${doc.id.slice(0, 8)}`}
                       </span>
                       <span className="doc-meta">
-                        {new Date(doc.createdAt).toLocaleDateString()} • 
-                        {doc.content.length} chars
+                        {new Date(doc.createdAt).toLocaleDateString()} • {doc.content.length} chars •{' '}
+                        <span className={`doc-status ${doc.status.toLowerCase()}`}>
+                          {STATUS_LABELS[doc.status]}
+                        </span>
                       </span>
+                      {doc.status === 'FAILED' && doc.error && (
+                        <span className="doc-error">{doc.error}</span>
+                      )}
                     </div>
                   </div>
                   <button

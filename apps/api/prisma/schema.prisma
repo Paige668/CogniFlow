@@ -9,13 +9,21 @@ datasource db {
   extensions = [vector]
 }
 
+enum DocumentStatus {
+  PENDING // waiting to be embedded, or waiting for a retry
+  READY // embedded and searchable
+  FAILED // embedding gave up; `error` says why
+}
+
 model Document {
-  id        String   @id @default(cuid())
+  id        String         @id @default(cuid())
   content   String
   metadata  Json?
   embedding Unsupported("vector(1536)")? // OpenAI embedding dimensionality
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  status    DocumentStatus @default(PENDING)
+  error     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
   @@map("documents")
 }

@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { openai } from '@ai-sdk/openai';
-import { streamText, embed, stepCountIs } from 'ai';
+import { streamText, stepCountIs } from 'ai';
 import { z } from 'zod';
 import { zodSchema } from '@ai-sdk/provider-utils';
 import { PrismaService } from '../prisma.service';
+import { EmbeddingService } from '../embedding.service';
 import { FeatureFlagsService } from '../feature-flags.service';
 
 @Injectable()
@@ -12,6 +13,7 @@ export class AgentService {
 
     constructor(
         private prisma: PrismaService,
+        private embeddings: EmbeddingService,
         private featureFlags: FeatureFlagsService,
     ) { }
 
@@ -28,14 +30,13 @@ export class AgentService {
 
                 let embedding: number[];
                 try {
-                    const result = await embed({
-                        model: openai.embedding('text-embedding-3-small'),
-                        value: query,
-                    });
-                    embedding = result.embedding;
-                } catch (e) {
-                    this.logger.warn('Embedding failed during search, using random vector');
-                    embedding = Array.from({ length: 1536 }, () => Math.random());
+                    embedding = await this.embeddings.embed(query);
+                } catch (error) {
+                    this.logger.error(`Query embedding failed: ${error instanceof Error ? error.message : error}`);
+                    // The model reads this message as the tool result, so provider details stay in the log.
+                    throw new Error(
+                        'Knowledge base search is unavailable right now. Tell the user the documents could not be searched.',
+                    );
                 }
 
                 const vectorString = `[${embedding.join(',')}]`;

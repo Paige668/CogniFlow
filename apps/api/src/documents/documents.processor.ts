@@ -1,65 +1,90 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { Logger } from '@nestjs/common';
-import { openai } from '@ai-sdk/openai';
-import { embed } from 'ai';
 import { PrismaService } from '../prisma.service';
+import { EmbeddingService, isPermanentEmbeddingError } from '../embedding.service';
+
+export interface ProcessDocumentJob {
+    documentId: string;
+}
 
 @Processor('documents')
 export class DocumentsProcessor extends WorkerHost {
     private readonly logger = new Logger(DocumentsProcessor.name);
 
-    constructor(private prisma: PrismaService) {
+    constructor(
+        private prisma: PrismaService,
+        private embeddings: EmbeddingService,
+    ) {
         super();
     }
 
-    async process(job: Job<any, any, string>): Promise<any> {
+    async process(job: Job<ProcessDocumentJob>): Promise<void> {
         this.logger.log(`Processing job ${job.id} of type ${job.name}`);
 
         switch (job.name) {
             case 'process-document':
-                return this.handleProcessDocument(job.data);
+                return this.handleProcessDocument(job);
             default:
-                throw new Error('Unknown job name');
+                throw new UnrecoverableError(`Unknown job name: ${job.name}`);
         }
     }
 
-    private async handleProcessDocument(data: any) {
-        const { documentId, content } = data;
-        this.logger.log(`Parsing and embedding document: ${documentId}`);
+    private async handleProcessDocument(job: Job<ProcessDocumentJob>) {
+        const { documentId } = job.data;
 
-        try {
-            let embedding: number[];
-
-            try {
-                // 1. Try Real Embedding
-                const result = await embed({
-                    model: openai.embedding('text-embedding-3-small'),
-                    value: content,
-                });
-                embedding = result.embedding;
-                this.logger.log(`Generated real embedding for document ${documentId}`);
-            } catch (error: any) { // Explicitly type error as 'any' or 'unknown'
-                this.logger.warn(`OpenAI embedding failed, falling back to MOCK vector. Error: ${error.message}`);
-                // Fallback: Generate random 1536-dim vector
-                embedding = Array.from({ length: 1536 }, () => Math.random());
-            }
-
-            this.logger.log(`Storing embedding mechanism for document ${documentId}`);
-
-            // 2. Store in Vector Database (pgvector)
-            const vectorString = `[${embedding.join(',')}]`;
-
-            await this.prisma.$executeRaw`
-        UPDATE documents
-        SET embedding = ${vectorString}::vector
-        WHERE id = ${documentId}
-      `;
-
-            this.logger.log(`Document ${documentId} processed and vector stored completely.`);
-        } catch (error) {
-            this.logger.error(`Failed to process document ${documentId}`, error);
-            throw error;
+        // Load the content here instead of carrying it in the job, so every retry
+        // embeds what is actually stored.
+        const doc = await this.prisma.document.findUnique({ where: { id: documentId } });
+        if (!doc) {
+            this.logger.warn(`Document ${documentId} was deleted before it was processed`);
+            return;
         }
+
+        let embedding: number[];
+        try {
+            // No SDK-level retries here: the queue retries the whole job (see DocumentsQueueModule).
+            embedding = await this.embeddings.embed(doc.content, { maxRetries: 0 });
+        } catch (error) {
+            throw await this.recordEmbeddingFailure(job, error);
+        }
+
+        const vectorString = `[${embedding.join(',')}]`;
+        await this.prisma.$executeRaw`
+            UPDATE documents
+            SET embedding = ${vectorString}::vector, status = 'READY', error = NULL, "updatedAt" = NOW()
+            WHERE id = ${documentId}
+        `;
+
+        this.logger.log(`Document ${documentId} embedded and searchable`);
+    }
+
+    /**
+     * Marks the document FAILED once no retry is left, and returns the error to throw so
+     * BullMQ skips the remaining attempts for failures that retrying cannot fix.
+     */
+    private async recordEmbeddingFailure(job: Job<ProcessDocumentJob>, error: unknown): Promise<Error> {
+        const { documentId } = job.data;
+        const message = error instanceof Error ? error.message : String(error);
+        const permanent = isPermanentEmbeddingError(error);
+        // Same rule BullMQ applies after we throw, so the status we record matches what the queue does next.
+        const attempts = job.opts.attempts ?? 1;
+        const willRetry = !permanent && job.attemptsMade + 1 < attempts;
+
+        this.logger.warn(
+            `Embedding failed for document ${documentId} (attempt ${job.attemptsMade + 1}/${attempts}, ` +
+                `${willRetry ? 'will retry' : 'giving up'}): ${message}`,
+        );
+
+        if (!willRetry) {
+            // updateMany: the document may have been deleted meanwhile, which is not an error.
+            await this.prisma.document.updateMany({
+                where: { id: documentId },
+                data: { status: 'FAILED', error: message },
+            });
+        }
+
+        if (permanent) return new UnrecoverableError(message);
+        return error instanceof Error ? error : new Error(message);
     }
 }

@@ -5,6 +5,7 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaService } from './prisma.service';
+import { EmbeddingService } from './embedding.service';
 import { DocumentsModule } from './documents/documents.module';
 import { MetricsService } from './metrics.service';
 import { MetricsController } from './metrics.controller';
@@ -31,6 +32,7 @@ import { LoggingInterceptor } from './logging.interceptor';
   providers: [
     AppService,
     PrismaService,
+    EmbeddingService,
     MetricsService,
     FeatureFlagsService,
     {
@@ -38,6 +40,6 @@ import { LoggingInterceptor } from './logging.interceptor';
       useClass: LoggingInterceptor,
     },
   ],
-  exports: [PrismaService, MetricsService, FeatureFlagsService],
+  exports: [PrismaService, EmbeddingService, MetricsService, FeatureFlagsService],
 })
 export class AppModule { }
