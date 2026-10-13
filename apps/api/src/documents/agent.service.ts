@@ -9,70 +9,77 @@ import { FeatureFlagsService } from '../feature-flags.service';
 
 @Injectable()
 export class AgentService {
-    private readonly logger = new Logger(AgentService.name);
+  private readonly logger = new Logger(AgentService.name);
 
-    constructor(
-        private prisma: PrismaService,
-        private embeddings: EmbeddingService,
-        private featureFlags: FeatureFlagsService,
-    ) { }
+  constructor(
+    private prisma: PrismaService,
+    private embeddings: EmbeddingService,
+    private featureFlags: FeatureFlagsService,
+  ) {}
 
-    private async getSearchTool() {
-        const searchInputSchema = z.object({
-            query: z.string().describe('The search query to find relevant documents'),
-        });
+  private async getSearchTool() {
+    const searchInputSchema = z.object({
+      query: z.string().describe('The search query to find relevant documents'),
+    });
 
-        return {
-            description: 'Search the knowledge base for relevant documents.',
-            inputSchema: zodSchema(searchInputSchema),
-            execute: async ({ query }: { query: string }) => {
-                this.logger.log(`Agent searching for: ${query}`);
+    return {
+      description: 'Search the knowledge base for relevant documents.',
+      inputSchema: zodSchema(searchInputSchema),
+      execute: async ({ query }: { query: string }) => {
+        this.logger.log(`Agent searching for: ${query}`);
 
-                let embedding: number[];
-                try {
-                    embedding = await this.embeddings.embed(query);
-                } catch (error) {
-                    this.logger.error(`Query embedding failed: ${error instanceof Error ? error.message : error}`);
-                    // The model reads this message as the tool result, so provider details stay in the log.
-                    throw new Error(
-                        'Knowledge base search is unavailable right now. Tell the user the documents could not be searched.',
-                    );
-                }
+        let embedding: number[];
+        try {
+          embedding = await this.embeddings.embed(query);
+        } catch (error) {
+          this.logger.error(
+            `Query embedding failed: ${error instanceof Error ? error.message : error}`,
+          );
+          // The model reads this message as the tool result, so provider details stay in the log.
+          throw new Error(
+            'Knowledge base search is unavailable right now. Tell the user the documents could not be searched.',
+          );
+        }
 
-                const vectorString = `[${embedding.join(',')}]`;
-                const results = await this.prisma.$queryRawUnsafe<any[]>(`
+        const vectorString = `[${embedding.join(',')}]`;
+        const results = await this.prisma.$queryRawUnsafe<any[]>(
+          `
           SELECT id, content, metadata, 1 - (embedding <=> $1::vector) as similarity
           FROM documents
           WHERE 1 - (embedding <=> $1::vector) > 0.5
           ORDER BY similarity DESC
           LIMIT 3
-        `, vectorString);
+        `,
+          vectorString,
+        );
 
-                this.logger.log(`Found ${results.length} relevant documents`);
-                return results.map((doc: any) => ({
-                    content: doc.content.substring(0, 500) + '...',
-                    metadata: doc.metadata,
-                    similarity: doc.similarity,
-                }));
-            },
-        };
-    }
+        this.logger.log(`Found ${results.length} relevant documents`);
+        return results.map((doc: any) => ({
+          content: doc.content.substring(0, 500) + '...',
+          metadata: doc.metadata,
+          similarity: doc.similarity,
+        }));
+      },
+    };
+  }
 
-    async chat(messages: any[]): Promise<{ fullStream: AsyncIterable<TextStreamPart<ToolSet>> }> {
-        const useGpt4o = this.featureFlags.get('use_gpt4o');
-        const ragEnabled = this.featureFlags.get('rag_enabled');
-        const model = useGpt4o ? 'gpt-4o' : 'gpt-4o-mini';
+  async chat(
+    messages: any[],
+  ): Promise<{ fullStream: AsyncIterable<TextStreamPart<ToolSet>> }> {
+    const useGpt4o = this.featureFlags.get('use_gpt4o');
+    const ragEnabled = this.featureFlags.get('rag_enabled');
+    const model = useGpt4o ? 'gpt-4o' : 'gpt-4o-mini';
 
-        this.logger.log(`Chat: model=${model}, rag=${ragEnabled}`);
+    this.logger.log(`Chat: model=${model}, rag=${ragEnabled}`);
 
-        const tools = ragEnabled
-            ? { search_knowledge_base: (await this.getSearchTool()) as any }
-            : undefined;
+    const tools = ragEnabled
+      ? { search_knowledge_base: (await this.getSearchTool()) as any }
+      : undefined;
 
-        const result = streamText({
-            model: openai(model),
-            messages,
-            system: `You are a helpful AI Knowledge Agent for CogniFlow.
+    const result = streamText({
+      model: openai(model),
+      messages,
+      system: `You are a helpful AI Knowledge Agent for CogniFlow.
 You have access to a knowledge base of uploaded documents.
 
 RULES:
@@ -80,11 +87,11 @@ RULES:
 2. If you find relevant information, cite the document name in your answer.
 3. If the answer is not in the documents, rely on your general knowledge but mention that you couldn't find it in the docs.
 4. Be concise and professional.`,
-            // The SDK stops after one step by default, which ends the stream right after a tool call.
-            // Allowing a few steps lets the model read the search results and write the answer.
-            ...(tools && { tools, stopWhen: stepCountIs(3) }),
-        });
+      // The SDK stops after one step by default, which ends the stream right after a tool call.
+      // Allowing a few steps lets the model read the search results and write the answer.
+      ...(tools && { tools, stopWhen: stepCountIs(3) }),
+    });
 
-        return result;
-    }
+    return result;
+  }
 }

@@ -8,7 +8,8 @@ import { AgentService } from './agent.service';
 type Part = TextStreamPart<ToolSet>;
 
 const text = (t: string) => ({ type: 'text-delta', id: '1', text: t }) as Part;
-const toolCall = () => ({ type: 'tool-call', toolName: 'search_knowledge_base' }) as unknown as Part;
+const toolCall = () =>
+  ({ type: 'tool-call', toolName: 'search_knowledge_base' }) as unknown as Part;
 const errorPart = (error: unknown) => ({ type: 'error', error }) as Part;
 
 async function* stream(parts: Part[]) {
@@ -30,7 +31,9 @@ function makeResponse() {
     }),
     end: jest.fn(() => calls.push('end')),
     destroy: jest.fn(() => calls.push('destroy')),
-    json: jest.fn((body: unknown) => calls.push(`json ${JSON.stringify(body)}`)),
+    json: jest.fn((body: unknown) =>
+      calls.push(`json ${JSON.stringify(body)}`),
+    ),
   };
   return { res: res as unknown as Response, calls };
 }
@@ -54,10 +57,16 @@ describe('DocumentsController chat', () => {
     jest.spyOn(controller['logger'], 'warn').mockImplementation();
   });
 
-  const chat = (res: Response) => controller.chat({ messages: [{ role: 'user', content: 'hi' }] } as any, res);
+  const chat = (res: Response) =>
+    controller.chat(
+      { messages: [{ role: 'user', content: 'hi' }] } as any,
+      res,
+    );
 
   it('streams the answer text with a 200 and ends the response', async () => {
-    agent.chat.mockResolvedValue({ fullStream: stream([toolCall(), text('Hello'), text(' world')]) });
+    agent.chat.mockResolvedValue({
+      fullStream: stream([toolCall(), text('Hello'), text(' world')]),
+    });
     const { res, calls } = makeResponse();
 
     await chat(res);
@@ -66,7 +75,11 @@ describe('DocumentsController chat', () => {
   });
 
   it('returns a 502 with a generic message when the provider fails before any text', async () => {
-    agent.chat.mockResolvedValue({ fullStream: stream([errorPart(new Error('insufficient_quota: secret details'))]) });
+    agent.chat.mockResolvedValue({
+      fullStream: stream([
+        errorPart(new Error('insufficient_quota: secret details')),
+      ]),
+    });
     const { res, calls } = makeResponse();
 
     await chat(res);
@@ -88,7 +101,12 @@ describe('DocumentsController chat', () => {
   });
 
   it('destroys the response when the provider fails mid-answer, so the client cannot mistake it for a full answer', async () => {
-    agent.chat.mockResolvedValue({ fullStream: stream([text('Partial'), errorPart(new Error('connection reset'))]) });
+    agent.chat.mockResolvedValue({
+      fullStream: stream([
+        text('Partial'),
+        errorPart(new Error('connection reset')),
+      ]),
+    });
     const { res, calls } = makeResponse();
 
     await chat(res);

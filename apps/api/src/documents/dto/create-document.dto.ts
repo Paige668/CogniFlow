@@ -1,3 +1,3 @@
 export class CreateDocumentDto {
-    content?: string;
+  content?: string;
 }

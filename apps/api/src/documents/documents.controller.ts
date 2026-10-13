@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseInterceptors, UploadedFile, Res, Logger } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseInterceptors,
+  UploadedFile,
+  Res,
+  Logger,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentsService } from './documents.service';
@@ -13,8 +25,8 @@ export class DocumentsController {
 
   constructor(
     private readonly documentsService: DocumentsService,
-    private readonly agentService: AgentService
-  ) { }
+    private readonly agentService: AgentService,
+  ) {}
 
   @Post('chat')
   async chat(@Body() chatDto: ChatDto, @Res() res: Response) {
@@ -49,13 +61,18 @@ export class DocumentsController {
         return;
       }
       // Provider details stay in the log; the client only learns what happened.
-      res.status(502).json({ message: 'The assistant could not get an answer from the AI model. Please try again later.' });
+      res.status(502).json({
+        message:
+          'The assistant could not get an answer from the AI model. Please try again later.',
+      });
       return;
     }
 
     if (!started) {
       this.logger.warn('Chat finished without any answer text');
-      res.status(502).json({ message: 'The AI model returned an empty answer.' });
+      res
+        .status(502)
+        .json({ message: 'The AI model returned an empty answer.' });
       return;
     }
     res.end();
@@ -63,7 +80,10 @@ export class DocumentsController {
 
   @Post()
   @UseInterceptors(FileInterceptor('file'))
-  create(@Body() createDocumentDto: CreateDocumentDto, @UploadedFile() file: Express.Multer.File) {
+  create(
+    @Body() createDocumentDto: CreateDocumentDto,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
     return this.documentsService.create(createDocumentDto, file);
   }
 
@@ -78,7 +98,10 @@ export class DocumentsController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateDocumentDto: UpdateDocumentDto) {
+  update(
+    @Param('id') id: string,
+    @Body() updateDocumentDto: UpdateDocumentDto,
+  ) {
     return this.documentsService.update(id, updateDocumentDto);
   }
 

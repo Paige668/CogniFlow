@@ -40,6 +40,11 @@ import { LoggingInterceptor } from './logging.interceptor';
       useClass: LoggingInterceptor,
     },
   ],
-  exports: [PrismaService, EmbeddingService, MetricsService, FeatureFlagsService],
+  exports: [
+    PrismaService,
+    EmbeddingService,
+    MetricsService,
+    FeatureFlagsService,
+  ],
 })
-export class AppModule { }
+export class AppModule {}

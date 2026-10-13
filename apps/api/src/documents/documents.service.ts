@@ -10,17 +10,23 @@ import type { ProcessDocumentJob } from './documents.processor';
 export class DocumentsService {
   constructor(
     private prisma: PrismaService,
-    @InjectQueue('documents') private documentsQueue: Queue
-  ) { }
+    @InjectQueue('documents') private documentsQueue: Queue,
+  ) {}
 
-  async create(createDocumentDto: CreateDocumentDto, file?: Express.Multer.File) {
+  async create(
+    createDocumentDto: CreateDocumentDto,
+    file?: Express.Multer.File,
+  ) {
     let content = createDocumentDto.content || '';
 
     // Simple mock of file processing - in real app this goes to Queue
     if (file) {
       // Check if it's a text-based file
       const textMimeTypes = ['text/plain', 'text/markdown', 'application/json'];
-      if (textMimeTypes.includes(file.mimetype) || file.mimetype.startsWith('text/')) {
+      if (
+        textMimeTypes.includes(file.mimetype) ||
+        file.mimetype.startsWith('text/')
+      ) {
         content = file.buffer.toString('utf-8');
       } else {
         // For binary files (PDF, DOC, etc.), use placeholder text
@@ -35,9 +41,9 @@ export class DocumentsService {
         metadata: {
           originalName: file?.originalname,
           size: file?.size,
-          mimeType: file?.mimetype
-        }
-      }
+          mimeType: file?.mimetype,
+        },
+      },
     });
 
     // Queue embedding in the background; retries are configured on the queue (DocumentsQueueModule)
@@ -49,7 +55,7 @@ export class DocumentsService {
 
   findAll() {
     return this.prisma.document.findMany({
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
   }
 

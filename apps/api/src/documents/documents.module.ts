@@ -10,4 +10,4 @@ import { AgentService } from './agent.service';
   providers: [DocumentsService, AgentService],
   exports: [AgentService],
 })
-export class DocumentsModule { }
+export class DocumentsModule {}
