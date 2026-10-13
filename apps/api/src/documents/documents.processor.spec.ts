@@ -76,7 +76,10 @@ describe('DocumentsProcessor', () => {
     expect(embeddings.embed).toHaveBeenCalledWith('hello world', {
       maxRetries: 0,
     });
-    const [sql, ...values] = prisma.$executeRaw.mock.calls[0];
+    const [sql, ...values] = prisma.$executeRaw.mock.calls[0] as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
     expect(sql.join('?')).toContain("status = 'READY'");
     expect(values).toEqual(['[0.6,0.8]', 'doc-1']);
     expect(prisma.document.updateMany).not.toHaveBeenCalled();

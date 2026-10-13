@@ -1,4 +1,4 @@
-import { IsArray, IsString, IsNotEmpty } from 'class-validator';
+import { IsArray } from 'class-validator';
 
 export class ChatDto {
   @IsArray()

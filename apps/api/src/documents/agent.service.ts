@@ -1,11 +1,27 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { openai } from '@ai-sdk/openai';
-import { streamText, stepCountIs, type TextStreamPart, type ToolSet } from 'ai';
+import {
+  streamText,
+  stepCountIs,
+  tool,
+  type ModelMessage,
+  type TextStreamPart,
+  type ToolSet,
+} from 'ai';
 import { z } from 'zod';
 import { zodSchema } from '@ai-sdk/provider-utils';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { EmbeddingService } from '../embedding.service';
 import { FeatureFlagsService } from '../feature-flags.service';
+
+// One row of the similarity search in getSearchTool.
+interface SearchRow {
+  id: string;
+  content: string;
+  metadata: Prisma.JsonValue;
+  similarity: number;
+}
 
 @Injectable()
 export class AgentService {
@@ -17,12 +33,12 @@ export class AgentService {
     private featureFlags: FeatureFlagsService,
   ) {}
 
-  private async getSearchTool() {
+  private getSearchTool() {
     const searchInputSchema = z.object({
       query: z.string().describe('The search query to find relevant documents'),
     });
 
-    return {
+    return tool({
       description: 'Search the knowledge base for relevant documents.',
       inputSchema: zodSchema(searchInputSchema),
       execute: async ({ query }: { query: string }) => {
@@ -42,7 +58,7 @@ export class AgentService {
         }
 
         const vectorString = `[${embedding.join(',')}]`;
-        const results = await this.prisma.$queryRawUnsafe<any[]>(
+        const results = await this.prisma.$queryRawUnsafe<SearchRow[]>(
           `
           SELECT id, content, metadata, 1 - (embedding <=> $1::vector) as similarity
           FROM documents
@@ -54,18 +70,18 @@ export class AgentService {
         );
 
         this.logger.log(`Found ${results.length} relevant documents`);
-        return results.map((doc: any) => ({
+        return results.map((doc) => ({
           content: doc.content.substring(0, 500) + '...',
           metadata: doc.metadata,
           similarity: doc.similarity,
         }));
       },
-    };
+    });
   }
 
-  async chat(
-    messages: any[],
-  ): Promise<{ fullStream: AsyncIterable<TextStreamPart<ToolSet>> }> {
+  chat(messages: ModelMessage[]): {
+    fullStream: AsyncIterable<TextStreamPart<ToolSet>>;
+  } {
     const useGpt4o = this.featureFlags.get('use_gpt4o');
     const ragEnabled = this.featureFlags.get('rag_enabled');
     const model = useGpt4o ? 'gpt-4o' : 'gpt-4o-mini';
@@ -73,7 +89,7 @@ export class AgentService {
     this.logger.log(`Chat: model=${model}, rag=${ragEnabled}`);
 
     const tools = ragEnabled
-      ? { search_knowledge_base: (await this.getSearchTool()) as any }
+      ? { search_knowledge_base: this.getSearchTool() }
       : undefined;
 
     const result = streamText({

@@ -33,7 +33,7 @@ export class DocumentsController {
     let started = false;
 
     try {
-      const result = await this.agentService.chat(chatDto.messages);
+      const result = this.agentService.chat(chatDto.messages);
       // fullStream reports model and provider errors as 'error' parts; textStream would skip them silently.
       for await (const part of result.fullStream) {
         if (part.type === 'error') throw part.error;

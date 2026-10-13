@@ -4,6 +4,7 @@ import type { TextStreamPart, ToolSet } from 'ai';
 import { DocumentsController } from './documents.controller';
 import { DocumentsService } from './documents.service';
 import { AgentService } from './agent.service';
+import { ChatDto } from './dto/chat.dto';
 
 type Part = TextStreamPart<ToolSet>;
 
@@ -13,7 +14,11 @@ const toolCall = () =>
 const errorPart = (error: unknown) => ({ type: 'error', error }) as Part;
 
 async function* stream(parts: Part[]) {
-  for (const part of parts) yield part;
+  for (const part of parts) {
+    // Each part arrives on a later tick, like chunks from a network stream.
+    await Promise.resolve();
+    yield part;
+  }
 }
 
 // Records what the controller does to the response, in order.
@@ -59,12 +64,12 @@ describe('DocumentsController chat', () => {
 
   const chat = (res: Response) =>
     controller.chat(
-      { messages: [{ role: 'user', content: 'hi' }] } as any,
+      { messages: [{ role: 'user', content: 'hi' }] } as ChatDto,
       res,
     );
 
   it('streams the answer text with a 200 and ends the response', async () => {
-    agent.chat.mockResolvedValue({
+    agent.chat.mockReturnValue({
       fullStream: stream([toolCall(), text('Hello'), text(' world')]),
     });
     const { res, calls } = makeResponse();
@@ -75,7 +80,7 @@ describe('DocumentsController chat', () => {
   });
 
   it('returns a 502 with a generic message when the provider fails before any text', async () => {
-    agent.chat.mockResolvedValue({
+    agent.chat.mockReturnValue({
       fullStream: stream([
         errorPart(new Error('insufficient_quota: secret details')),
       ]),
@@ -92,7 +97,9 @@ describe('DocumentsController chat', () => {
   });
 
   it('returns a 502 when the agent throws before streaming starts', async () => {
-    agent.chat.mockRejectedValue(new Error('boom'));
+    agent.chat.mockImplementation(() => {
+      throw new Error('boom');
+    });
     const { res, calls } = makeResponse();
 
     await chat(res);
@@ -101,7 +108,7 @@ describe('DocumentsController chat', () => {
   });
 
   it('destroys the response when the provider fails mid-answer, so the client cannot mistake it for a full answer', async () => {
-    agent.chat.mockResolvedValue({
+    agent.chat.mockReturnValue({
       fullStream: stream([
         text('Partial'),
         errorPart(new Error('connection reset')),
@@ -111,12 +118,12 @@ describe('DocumentsController chat', () => {
 
     await chat(res);
 
+    // No 'end': the response is destroyed, not finished.
     expect(calls).toEqual(['status 200', 'write Partial', 'destroy']);
-    expect(res.end).not.toHaveBeenCalled();
   });
 
   it('returns a 502 when the stream finishes without any answer text', async () => {
-    agent.chat.mockResolvedValue({ fullStream: stream([toolCall()]) });
+    agent.chat.mockReturnValue({ fullStream: stream([toolCall()]) });
     const { res, calls } = makeResponse();
 
     await chat(res);

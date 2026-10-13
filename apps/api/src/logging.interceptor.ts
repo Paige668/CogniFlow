@@ -5,6 +5,7 @@ import {
   CallHandler,
   Logger,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { MetricsService } from './metrics.service';
@@ -16,7 +17,7 @@ export class LoggingInterceptor implements NestInterceptor {
   constructor(private readonly metrics: MetricsService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    const req = context.switchToHttp().getRequest();
+    const req = context.switchToHttp().getRequest<Request>();
     const { method, url } = req;
     const start = Date.now();
 
@@ -27,10 +28,10 @@ export class LoggingInterceptor implements NestInterceptor {
           this.logger.log(`${method} ${url} ${duration}ms`);
           this.metrics.incrementRequest(url, duration);
         },
-        error: (err) => {
+        error: (err: unknown) => {
           const duration = Date.now() - start;
           this.logger.error(
-            `${method} ${url} ${duration}ms — ERROR: ${err.message}`,
+            `${method} ${url} ${duration}ms — ERROR: ${err instanceof Error ? err.message : String(err)}`,
           );
           this.metrics.incrementRequest(url, duration);
           this.metrics.incrementError();
