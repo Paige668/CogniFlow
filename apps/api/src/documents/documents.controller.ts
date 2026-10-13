@@ -3,7 +3,6 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
   Delete,
   UseInterceptors,
@@ -16,7 +15,6 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentsService } from './documents.service';
 import { AgentService } from './agent.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
-import { UpdateDocumentDto } from './dto/update-document.dto';
 import { ChatDto } from './dto/chat.dto';
 
 @Controller('documents')
@@ -95,14 +93,6 @@ export class DocumentsController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.documentsService.findOne(id);
-  }
-
-  @Patch(':id')
-  update(
-    @Param('id') id: string,
-    @Body() updateDocumentDto: UpdateDocumentDto,
-  ) {
-    return this.documentsService.update(id, updateDocumentDto);
   }
 
   @Delete(':id')

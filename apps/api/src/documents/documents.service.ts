@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { CreateDocumentDto } from './dto/create-document.dto';
-import { UpdateDocumentDto } from './dto/update-document.dto';
 import { PrismaService } from '../prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -61,10 +60,6 @@ export class DocumentsService {
 
   findOne(id: string) {
     return this.prisma.document.findUnique({ where: { id } });
-  }
-
-  update(id: string, updateDocumentDto: UpdateDocumentDto) {
-    return `This action updates a #${id} document`;
   }
 
   remove(id: string) {
