@@ -5,7 +5,7 @@ A document question-answering agent. You upload text documents, they are embedde
 
 Built with NestJS 11, Next.js 16 (React 19), PostgreSQL + pgvector, Redis + BullMQ and the Vercel AI SDK v6 with OpenAI models.
 
-> **Status:** a learning project, not production software. See [Known limitations](#known-limitations).
+> **Status:** a learning project, not production software. Last run end to end on 2026-10-14 with a funded OpenAI key: a Markdown upload reached `READY` in about 1 second, and `gpt-4o` answered questions about it by calling the search tool. The same run showed that retrieval is not reliable yet. A fact that starts just after character 500 of the document was missed, because the search tool returns only the first 500 characters of each match. And because each document has one vector, every search query scored between 0.46 and 0.56 against it, around the fixed 0.5 cut-off: the same question was answered in one run and "not found" in the next, depending on how the model worded its search. See [Known limitations](#known-limitations).
 
 ---
 
@@ -130,7 +130,7 @@ The repository also has shell scripts (`test-upload.sh`, `test-chat.sh`) for man
 ## Known limitations
 
 - **No users or access control.** Every search ranks every stored document. For any multi-user use, the filter on what the current user may read has to run before the similarity search, not after it.
-- **One vector per document.** Documents are not split into chunks, and the tool returns only the first 500 characters of each match, so long documents are poorly searchable.
+- **One vector per document.** Documents are not split into chunks, and the tool returns only the first 500 characters of each match, so long documents are poorly searchable. The 0.5 similarity cut-off is a fixed guess: with whole-document vectors, relevant and unrelated queries score in the same range.
 - **Text files only.** PDF and Word uploads are accepted but their text is not extracted; a placeholder sentence is stored and embedded instead.
 - **Citations are not enforced.** The system prompt asks the model to name the documents it used; nothing checks that it does.
 - **`/flags` has no authentication.** Anyone who can reach the API can switch the model or turn search off.
