@@ -28,6 +28,8 @@ PostgreSQL    Redis
 
 **Chat.** `POST /documents/chat` streams the answer as chunked plain text. The model (`gpt-4o`, or `gpt-4o-mini` when the `use_gpt4o` flag is off) can call one tool, `search_knowledge_base`, defined with a Zod schema. The tool embeds the query and returns up to 3 documents whose cosine similarity is above 0.5, each cut to its first 500 characters. The agent can take up to 3 steps, so it can read the search results and then answer.
 
+**Request validation.** A global `ValidationPipe` checks request bodies against their DTOs and returns `400` with the reasons. A chat message must have `role` `user` or `assistant` and a string `content`; a `system` message from the client is rejected, because the system prompt is set on the server. Properties that a DTO does not declare are rejected, not silently dropped.
+
 **Errors in chat.** If the model or provider fails before any answer text, the API returns `502` with a short message; the details go to the server log. If it fails midway, the API drops the connection so the client cannot mistake a partial answer for a complete one. The web app shows the error and keeps any partial text, marked as incomplete.
 
 **Web app.** One page with the chat, a document panel (upload, status, failure reason, delete), a flags panel and a metrics panel. Model output is rendered as text, never as HTML; only `**bold**` is turned into markup.
@@ -79,7 +81,7 @@ Open `http://localhost:3001`. The web app calls the API at `NEXT_PUBLIC_API_URL`
 | `GET` | `/documents` | List documents, newest first, with `status` and `error`. |
 | `GET` | `/documents/:id` | Get one document. |
 | `DELETE` | `/documents/:id` | Delete a document and its embedding. |
-| `POST` | `/documents/chat` | Body `{ "messages": [{ "role": "user", "content": "..." }] }`. Streams the answer as `text/plain`, or returns `502 { "message": ... }`. |
+| `POST` | `/documents/chat` | Body `{ "messages": [{ "role": "user", "content": "..." }] }`. Streams the answer as `text/plain`. Returns `400` for an invalid body and `502 { "message": ... }` when the model fails. |
 | `GET` | `/flags` | List runtime flags. |
 | `POST` | `/flags/:name` | Toggle a flag. |
 | `GET` | `/metrics` | In-memory request counts, average duration per endpoint, chat requests and error count. |
@@ -113,7 +115,7 @@ cd apps/api && npx jest
 ```
 
 - `documents.processor.spec.ts` (8 tests): the worker's retry and failure rules, including fail-fast on a rejected key, a missing key, an input that is too long and an account without credits.
-- `documents.controller.spec.ts` (5 tests): the chat endpoint's success path, a `502` before any text, a dropped connection on a mid-answer failure, and an empty answer.
+- `documents.controller.spec.ts` (17 tests): the chat endpoint's success path, a `502` before any text, a dropped connection on a mid-answer failure, and an empty answer; and, over HTTP with the global validation pipe, a `400` for a client `system` message and for other malformed chat bodies, while file uploads still pass.
 
 The repository also has shell scripts (`test-upload.sh`, `test-chat.sh`) for manual checks against a running API.
 
@@ -131,7 +133,6 @@ The repository also has shell scripts (`test-upload.sh`, `test-chat.sh`) for man
 - **One vector per document.** Documents are not split into chunks, and the tool returns only the first 500 characters of each match, so long documents are poorly searchable.
 - **Text files only.** PDF and Word uploads are accepted but their text is not extracted; a placeholder sentence is stored and embedded instead.
 - **Citations are not enforced.** The system prompt asks the model to name the documents it used; nothing checks that it does.
-- **No request validation.** `ValidationPipe` is not registered, so the chat DTO is not validated and a client can send a `system` message.
 - **`/flags` has no authentication.** Anyone who can reach the API can switch the model or turn search off.
 - **Background job gaps.** The document is saved before its job is queued, so if queuing fails it stays `PENDING`. A job that stalls because the worker crashed also leaves it `PENDING`. A `FAILED` document has to be deleted and uploaded again.
 - **No evaluation.** There is no test set measuring answer or retrieval quality yet.
