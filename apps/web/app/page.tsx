@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { SignInButton, UserButton, useAuth } from '@clerk/nextjs';
 
 interface Message {
   id: string;
@@ -34,14 +35,15 @@ const STATUS_LABELS: Record<DocumentStatus, string> = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
+const WELCOME: Message = {
+  id: 'welcome',
+  role: 'assistant',
+  content: '👋 Welcome to **CogniFlow**! I am your AI Knowledge Agent. Upload documents and ask me anything about them.',
+};
+
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      content: '👋 Welcome to **CogniFlow**! I am your AI Knowledge Agent. Upload documents and ask me anything about them.',
-    },
-  ]);
+  const { isLoaded, isSignedIn, userId, getToken } = useAuth();
+  const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [flags, setFlags] = useState<Flag[]>([]);
@@ -54,9 +56,51 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Every API call carries the Clerk session token; the API rejects calls without one (401).
+  // getToken is memoized by Clerk, so these callbacks keep their identity between renders.
+  const apiFetch = useCallback(
+    async (path: string, init: RequestInit = {}) => {
+      const token = await getToken();
+      const headers = new Headers(init.headers);
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+      return fetch(`${API_URL}${path}`, { ...init, headers });
+    },
+    [getToken],
+  );
+
+  const fetchFlags = useCallback(async () => {
+    try {
+      const res = await apiFetch('/flags');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setFlags(data);
+    } catch (e) {
+      console.error('Failed to load flags', e);
+    }
+  }, [apiFetch]);
+
+  const fetchDocuments = useCallback(async () => {
+    try {
+      const res = await apiFetch('/documents');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setDocuments(data);
+    } catch (e) {
+      console.error('Failed to load documents', e);
+    }
+  }, [apiFetch]);
+
+  // Nothing from one account may stay on screen for the next: clear per-user state when the user changes.
   useEffect(() => {
-    fetchFlags();
-  }, []);
+    setMessages([WELCOME]);
+    setDocuments([]);
+    setMetrics(null);
+    setShowDocs(false);
+  }, [userId]);
+
+  useEffect(() => {
+    if (isSignedIn) fetchFlags();
+  }, [isSignedIn, fetchFlags]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -67,21 +111,12 @@ export default function ChatPage() {
     if (!showDocs || !documents.some((d) => d.status === 'PENDING')) return;
     const timer = setTimeout(fetchDocuments, 2000);
     return () => clearTimeout(timer);
-  }, [showDocs, documents]);
-
-  async function fetchFlags() {
-    try {
-      const res = await fetch(`${API_URL}/flags`);
-      const data = await res.json();
-      setFlags(data);
-    } catch (e) {
-      console.error('Failed to load flags', e);
-    }
-  }
+  }, [showDocs, documents, fetchDocuments]);
 
   async function fetchMetrics() {
     try {
-      const res = await fetch(`${API_URL}/metrics`);
+      const res = await apiFetch('/metrics');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setMetrics(data);
     } catch (e) {
@@ -91,21 +126,10 @@ export default function ChatPage() {
 
   async function toggleFlag(name: string) {
     try {
-      await fetch(`${API_URL}/flags/${name}`, { method: 'POST' });
+      await apiFetch(`/flags/${name}`, { method: 'POST' });
       fetchFlags();
     } catch (e) {
       console.error('Failed to toggle flag', e);
-    }
-  }
-
-  async function fetchDocuments() {
-    try {
-      const res = await fetch(`${API_URL}/documents`);
-      const data = await res.json();
-      console.log('Fetched documents:', data.length, 'documents');
-      setDocuments(data);
-    } catch (e) {
-      console.error('Failed to load documents', e);
     }
   }
 
@@ -115,7 +139,7 @@ export default function ChatPage() {
       const formData = new FormData();
       formData.append('file', file);
       
-      const res = await fetch(`${API_URL}/documents`, {
+      const res = await apiFetch('/documents', {
         method: 'POST',
         body: formData,
       });
@@ -149,7 +173,7 @@ export default function ChatPage() {
 
   async function deleteDocument(id: string) {
     try {
-      const res = await fetch(`${API_URL}/documents/${id}`, {
+      const res = await apiFetch(`/documents/${id}`, {
         method: 'DELETE',
       });
       if (res.ok) {
@@ -201,7 +225,7 @@ export default function ChatPage() {
         content: m.content,
       }));
 
-      const res = await fetch(`${API_URL}/documents/chat`, {
+      const res = await apiFetch('/documents/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: allMessages }),
@@ -264,6 +288,35 @@ export default function ChatPage() {
       .map((part, i) => (i % 2 === 1 ? <strong key={i}>{part}</strong> : part));
   }
 
+  if (!isLoaded) {
+    return <div className="app" />;
+  }
+
+  if (!isSignedIn) {
+    return (
+      <div className="app">
+        <header className="header">
+          <div className="header-brand">
+            <div className="logo">⚡</div>
+            <div>
+              <h1 className="header-title">CogniFlow</h1>
+              <p className="header-sub">AI Knowledge Agent</p>
+            </div>
+          </div>
+        </header>
+        <div className="panel">
+          <h2 className="panel-title">Sign in to CogniFlow</h2>
+          <p className="panel-sub">
+            Your documents and searches are private to your account: no other user can list, read, delete or search them.
+          </p>
+          <SignInButton mode="modal">
+            <button className="action-btn">Sign in</button>
+          </SignInButton>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       {/* Header */}
@@ -308,6 +361,7 @@ export default function ChatPage() {
           >
             🚩 Flags
           </button>
+          <UserButton />
         </div>
       </header>
 
