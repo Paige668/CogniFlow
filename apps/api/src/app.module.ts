@@ -1,7 +1,7 @@
 import { Module, Global } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaService } from './prisma.service';
@@ -12,6 +12,8 @@ import { MetricsController } from './metrics.controller';
 import { FeatureFlagsService } from './feature-flags.service';
 import { FeatureFlagsController } from './feature-flags.controller';
 import { LoggingInterceptor } from './logging.interceptor';
+import { ClerkTokenVerifier } from './auth/clerk-token-verifier';
+import { ClerkAuthGuard } from './auth/clerk-auth.guard';
 
 @Global()
 @Module({
@@ -35,6 +37,9 @@ import { LoggingInterceptor } from './logging.interceptor';
     EmbeddingService,
     MetricsService,
     FeatureFlagsService,
+    ClerkTokenVerifier,
+    // Every route needs a signed-in user unless it is marked @Public().
+    { provide: APP_GUARD, useClass: ClerkAuthGuard },
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,

@@ -9,6 +9,12 @@ import { DocumentsService } from './documents.service';
 import { AgentService } from './agent.service';
 import { ChatDto } from './dto/chat.dto';
 import { createValidationPipe } from '../validation';
+import { APP_GUARD } from '@nestjs/core';
+import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
+import {
+  AuthNotConfiguredError,
+  ClerkTokenVerifier,
+} from '../auth/clerk-token-verifier';
 
 type Part = TextStreamPart<ToolSet>;
 
@@ -69,6 +75,7 @@ describe('DocumentsController chat', () => {
   const chat = (res: Response) =>
     controller.chat(
       { messages: [{ role: 'user', content: 'hi' }] } as ChatDto,
+      'user_a',
       res,
     );
 
@@ -139,6 +146,40 @@ describe('DocumentsController chat', () => {
   });
 });
 
+// Stands in for Clerk: two known tokens, everything else is rejected like a bad signature.
+function fakeVerifier() {
+  return {
+    verify: jest.fn((token: string) => {
+      if (token === 'token-a') return Promise.resolve('user_a');
+      if (token === 'token-b') return Promise.resolve('user_b');
+      return Promise.reject(new Error('signature check failed: secret detail'));
+    }),
+  };
+}
+
+// An app with the real global guard and validation pipe, as main.ts and AppModule set them up.
+async function buildApp(providers: {
+  agent: { chat: jest.Mock };
+  documents: Record<string, jest.Mock>;
+  verifier: { verify: jest.Mock };
+}): Promise<INestApplication<App>> {
+  const moduleRef = await Test.createTestingModule({
+    controllers: [DocumentsController],
+    providers: [
+      { provide: DocumentsService, useValue: providers.documents },
+      { provide: AgentService, useValue: providers.agent },
+      { provide: ClerkTokenVerifier, useValue: providers.verifier },
+      { provide: APP_GUARD, useClass: ClerkAuthGuard },
+    ],
+  }).compile();
+  const app = moduleRef.createNestApplication<INestApplication<App>>({
+    logger: false,
+  });
+  app.useGlobalPipes(createValidationPipe());
+  await app.init();
+  return app;
+}
+
 // Goes through HTTP with the same global pipe as main.ts, so the DTO rules are really applied.
 describe('DocumentsController request validation', () => {
   let app: INestApplication<App>;
@@ -150,16 +191,7 @@ describe('DocumentsController request validation', () => {
       chat: jest.fn(() => ({ fullStream: stream([text('ok')]) })),
     };
     documents = { create: jest.fn(() => ({ id: 'doc1' })) };
-    const moduleRef = await Test.createTestingModule({
-      controllers: [DocumentsController],
-      providers: [
-        { provide: DocumentsService, useValue: documents },
-        { provide: AgentService, useValue: agent },
-      ],
-    }).compile();
-    app = moduleRef.createNestApplication({ logger: false });
-    app.useGlobalPipes(createValidationPipe());
-    await app.init();
+    app = await buildApp({ agent, documents, verifier: fakeVerifier() });
   });
 
   afterEach(() => app.close());
@@ -167,6 +199,7 @@ describe('DocumentsController request validation', () => {
   const postChat = (body: unknown) =>
     request(app.getHttpServer())
       .post('/documents/chat')
+      .set('Authorization', 'Bearer token-a')
       .send(body as object);
 
   it('accepts a conversation of user and assistant messages', async () => {
@@ -178,7 +211,7 @@ describe('DocumentsController request validation', () => {
 
     await postChat({ messages }).expect(200, 'ok');
 
-    expect(agent.chat).toHaveBeenCalledWith(messages);
+    expect(agent.chat).toHaveBeenCalledWith(messages, 'user_a');
   });
 
   it('rejects a system message from the client', async () => {
@@ -212,15 +245,101 @@ describe('DocumentsController request validation', () => {
     expect(agent.chat).not.toHaveBeenCalled();
   });
 
-  it('still accepts a file upload', async () => {
+  it('still accepts a file upload, stored for the signed-in user', async () => {
     await request(app.getHttpServer())
       .post('/documents')
+      .set('Authorization', 'Bearer token-a')
       .attach('file', Buffer.from('notes'), 'notes.md')
       .expect(201);
 
     expect(documents.create).toHaveBeenCalledWith(
+      'user_a',
       {},
       expect.objectContaining({ originalname: 'notes.md' }),
     );
+  });
+});
+
+describe('DocumentsController authentication', () => {
+  let app: INestApplication<App>;
+  let agent: { chat: jest.Mock };
+  let documents: Record<string, jest.Mock>;
+  let verifier: { verify: jest.Mock };
+
+  beforeEach(async () => {
+    agent = { chat: jest.fn(() => ({ fullStream: stream([text('ok')]) })) };
+    documents = {
+      create: jest.fn(() => ({ id: 'doc1' })),
+      findAll: jest.fn(() => []),
+      findOne: jest.fn(() => ({ id: 'doc1' })),
+      remove: jest.fn(() => ({ id: 'doc1' })),
+    };
+    verifier = fakeVerifier();
+    app = await buildApp({ agent, documents, verifier });
+  });
+
+  afterEach(() => app.close());
+
+  const chatBody = { messages: [{ role: 'user', content: 'hi' }] };
+
+  it.each([
+    ['no Authorization header', undefined],
+    ['another scheme', 'Basic dXNlcjpwYXNz'],
+    ['Bearer without a token', 'Bearer '],
+  ])(
+    'returns 401 for %s and never reaches the agent',
+    async (_case, header) => {
+      const req = request(app.getHttpServer()).post('/documents/chat');
+      if (header !== undefined) void req.set('Authorization', header);
+
+      await req.send(chatBody).expect(401);
+
+      expect(verifier.verify).not.toHaveBeenCalled();
+      expect(agent.chat).not.toHaveBeenCalled();
+    },
+  );
+
+  it('returns 401 with a generic message when Clerk rejects the token', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/documents')
+      .set('Authorization', 'Bearer forged-token')
+      .expect(401);
+
+    expect(JSON.stringify(res.body)).not.toContain('secret detail');
+    expect(documents.findAll).not.toHaveBeenCalled();
+  });
+
+  it('returns 500, not 401, when the server has no Clerk key', async () => {
+    verifier.verify.mockRejectedValue(new AuthNotConfiguredError());
+
+    const res = await request(app.getHttpServer())
+      .get('/documents')
+      .set('Authorization', 'Bearer token-a')
+      .expect(500);
+
+    expect(res.body).toEqual(
+      expect.objectContaining({
+        message: 'Sign-in is not set up on the server.',
+      }),
+    );
+    expect(documents.findAll).not.toHaveBeenCalled();
+  });
+
+  it('passes the user from the token, never from the request, to every documents route', async () => {
+    const server = app.getHttpServer();
+    const asUserB = (r: request.Test) =>
+      r.set('Authorization', 'Bearer token-b');
+
+    await asUserB(request(server).get('/documents')).expect(200);
+    await asUserB(request(server).get('/documents/doc1')).expect(200);
+    await asUserB(request(server).delete('/documents/doc1')).expect(200);
+    await asUserB(request(server).post('/documents/chat'))
+      .send(chatBody)
+      .expect(200);
+
+    expect(documents.findAll).toHaveBeenCalledWith('user_b');
+    expect(documents.findOne).toHaveBeenCalledWith('user_b', 'doc1');
+    expect(documents.remove).toHaveBeenCalledWith('user_b', 'doc1');
+    expect(agent.chat).toHaveBeenCalledWith(chatBody.messages, 'user_b');
   });
 });

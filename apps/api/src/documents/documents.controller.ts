@@ -16,6 +16,7 @@ import { DocumentsService } from './documents.service';
 import { AgentService } from './agent.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { ChatDto } from './dto/chat.dto';
+import { CurrentUserId } from '../auth/current-user-id.decorator';
 
 @Controller('documents')
 export class DocumentsController {
@@ -27,13 +28,17 @@ export class DocumentsController {
   ) {}
 
   @Post('chat')
-  async chat(@Body() chatDto: ChatDto, @Res() res: Response) {
+  async chat(
+    @Body() chatDto: ChatDto,
+    @CurrentUserId() userId: string,
+    @Res() res: Response,
+  ) {
     // Headers are sent with the first piece of answer text, so an error before that
     // can still get a real HTTP error status instead of a 200 with no answer.
     let started = false;
 
     try {
-      const result = this.agentService.chat(chatDto.messages);
+      const result = this.agentService.chat(chatDto.messages, userId);
       // fullStream reports model and provider errors as 'error' parts; textStream would skip them silently.
       for await (const part of result.fullStream) {
         if (part.type === 'error') throw part.error;
@@ -79,24 +84,25 @@ export class DocumentsController {
   @Post()
   @UseInterceptors(FileInterceptor('file'))
   create(
+    @CurrentUserId() userId: string,
     @Body() createDocumentDto: CreateDocumentDto,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    return this.documentsService.create(createDocumentDto, file);
+    return this.documentsService.create(userId, createDocumentDto, file);
   }
 
   @Get()
-  findAll() {
-    return this.documentsService.findAll();
+  findAll(@CurrentUserId() userId: string) {
+    return this.documentsService.findAll(userId);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.documentsService.findOne(id);
+  findOne(@CurrentUserId() userId: string, @Param('id') id: string) {
+    return this.documentsService.findOne(userId, id);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.documentsService.remove(id);
+  remove(@CurrentUserId() userId: string, @Param('id') id: string) {
+    return this.documentsService.remove(userId, id);
   }
 }

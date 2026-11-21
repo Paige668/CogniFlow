@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { PrismaService } from '../prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -12,7 +12,11 @@ export class DocumentsService {
     @InjectQueue('documents') private documentsQueue: Queue,
   ) {}
 
+  // Every method takes the owner's Clerk user ID and puts it in the query itself, so a
+  // document of another user is never loaded in the first place.
+
   async create(
+    userId: string,
     createDocumentDto: CreateDocumentDto,
     file?: Express.Multer.File,
   ) {
@@ -36,6 +40,7 @@ export class DocumentsService {
 
     const doc = await this.prisma.document.create({
       data: {
+        userId,
         content,
         metadata: {
           originalName: file?.originalname,
@@ -52,17 +57,27 @@ export class DocumentsService {
     return doc;
   }
 
-  findAll() {
+  findAll(userId: string) {
     return this.prisma.document.findMany({
+      where: { userId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  findOne(id: string) {
-    return this.prisma.document.findUnique({ where: { id } });
+  async findOne(userId: string, id: string) {
+    const doc = await this.prisma.document.findFirst({ where: { id, userId } });
+    // Same 404 for "does not exist" and "belongs to someone else", so IDs of other
+    // users' documents cannot be probed.
+    if (!doc) throw new NotFoundException('Document not found');
+    return doc;
   }
 
-  remove(id: string) {
-    return this.prisma.document.delete({ where: { id } });
+  async remove(userId: string, id: string) {
+    // The owner check and the delete are one statement, so nothing can change in between.
+    const { count } = await this.prisma.document.deleteMany({
+      where: { id, userId },
+    });
+    if (count === 0) throw new NotFoundException('Document not found');
+    return { id };
   }
 }

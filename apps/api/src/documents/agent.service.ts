@@ -33,7 +33,9 @@ export class AgentService {
     private featureFlags: FeatureFlagsService,
   ) {}
 
-  private getSearchTool() {
+  // The tool is built per request around the caller's user ID; the model cannot change it,
+  // because the ID is never part of the tool's input.
+  private getSearchTool(userId: string) {
     const searchInputSchema = z.object({
       query: z.string().describe('The search query to find relevant documents'),
     });
@@ -58,15 +60,20 @@ export class AgentService {
         }
 
         const vectorString = `[${embedding.join(',')}]`;
+        // The owner filter sits in the same WHERE as the similarity cut-off, so it applies before
+        // ORDER BY and LIMIT: the top 3 are chosen among the caller's documents only. Filtering
+        // after LIMIT would rank everyone's documents and could return none of the caller's.
         const results = await this.prisma.$queryRawUnsafe<SearchRow[]>(
           `
           SELECT id, content, metadata, 1 - (embedding <=> $1::vector) as similarity
           FROM documents
-          WHERE 1 - (embedding <=> $1::vector) > 0.5
+          WHERE "userId" = $2
+            AND 1 - (embedding <=> $1::vector) > 0.5
           ORDER BY similarity DESC
           LIMIT 3
         `,
           vectorString,
+          userId,
         );
 
         this.logger.log(`Found ${results.length} relevant documents`);
@@ -79,7 +86,10 @@ export class AgentService {
     });
   }
 
-  chat(messages: ModelMessage[]): {
+  chat(
+    messages: ModelMessage[],
+    userId: string,
+  ): {
     fullStream: AsyncIterable<TextStreamPart<ToolSet>>;
   } {
     const useGpt4o = this.featureFlags.get('use_gpt4o');
@@ -89,7 +99,7 @@ export class AgentService {
     this.logger.log(`Chat: model=${model}, rag=${ragEnabled}`);
 
     const tools = ragEnabled
-      ? { search_knowledge_base: this.getSearchTool() }
+      ? { search_knowledge_base: this.getSearchTool(userId) }
       : undefined;
 
     const result = streamText({

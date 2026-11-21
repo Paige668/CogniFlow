@@ -17,6 +17,7 @@ enum DocumentStatus {
 
 model Document {
   id        String         @id @default(cuid())
+  userId    String // Clerk user ID of the owner; every query filters on it
   content   String
   metadata  Json?
   embedding Unsupported("vector(1536)")? // OpenAI embedding dimensionality
@@ -25,5 +26,6 @@ model Document {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
+  @@index([userId, createdAt])
   @@map("documents")
 }
